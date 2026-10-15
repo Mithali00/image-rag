@@ -1,0 +1,10 @@
+flask
+gunicorn
+pillow
+pytesseract
+opencv-python-headless
+numpy
+sentence-transformers
+chromadb
+groq
+python-dotenv
