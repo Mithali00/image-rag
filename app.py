@@ -12,11 +12,8 @@ pytesseract.pytesseract.tesseract_cmd = (
 )
 
 # Load embedding model
-print("Loading embedding model...")
-model = SentenceTransformer(
-    "all-MiniLM-L6-v2",
-    local_files_only=True
-)
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
 print("Model loaded successfully!")
 
 HTML = """
