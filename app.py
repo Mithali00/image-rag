@@ -1,52 +1,40 @@
-from flask import Flask, request, render_template_string
-from PIL import Image
-import pytesseract
-from sentence_transformers import SentenceTransformer
+import os
+import shutil
+
+import streamlit as st
 import numpy as np
+import pytesseract
 
-app = Flask(__name__)
+from PIL import Image
+from sentence_transformers import SentenceTransformer
 
-# Tesseract path for Windows
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+# Configure the Streamlit page
+st.set_page_config(
+    page_title="Image-Based RAG Question Answering System",
+    page_icon="📚",
+    layout="wide"
 )
 
-# Load embedding model
-model = SentenceTransformer("all-MiniLM-L6-v2")
+st.title("📚 Image-Based RAG Question Answering System")
+st.write(
+    "Upload an image containing text, ask a question, "
+    "and find the most relevant answer."
+)
 
-print("Model loaded successfully!")
 
-HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Image-Based RAG Question Answering System</title>
-</head>
-<body>
-    <h1>Image-Based RAG Question Answering System</h1>
+# Configure Tesseract for Windows
+if os.name == "nt":
+    pytesseract.pytesseract.tesseract_cmd = (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    )
 
-    <form method="POST" enctype="multipart/form-data">
-        <p>Upload an image:</p>
-        <input type="file" name="image" accept="image/*" required>
 
-        <p>Ask a question:</p>
-        <input type="text" name="question" required>
+# Load the embedding model once and reuse it
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
-        <button type="submit">Get Answer</button>
-    </form>
-
-    {% if extracted_text %}
-        <h2>Extracted Text</h2>
-        <pre>{{ extracted_text }}</pre>
-    {% endif %}
-
-    {% if answer %}
-        <h2>Answer</h2>
-        <p>{{ answer }}</p>
-    {% endif %}
-</body>
-</html>
-"""
 
 # Split extracted text into sentences
 def split_text(text):
@@ -56,10 +44,11 @@ def split_text(text):
         if sentence.strip()
     ]
 
+
 # Find the most relevant sentence
-def find_answer(question, chunks):
+def find_answer(question, chunks, model):
     if not chunks:
-        return "No readable text found."
+        return "No readable text was found in the image."
 
     question_embedding = model.encode(question)
     chunk_embeddings = model.encode(chunks)
@@ -78,37 +67,83 @@ def find_answer(question, chunks):
     return chunks[best_index]
 
 
-@app.route("/", methods=["GET", "POST"])
-def home():
-    extracted_text = ""
-    answer = ""
+# Image upload
+uploaded_file = st.file_uploader(
+    "Upload an image",
+    type=["png", "jpg", "jpeg", "bmp", "tiff"]
+)
 
-    if request.method == "POST":
-        image_file = request.files.get("image")
-        question = request.form.get("question", "").strip()
+# Question input
+question = st.text_input(
+    "Ask a question about the image"
+)
 
-        if image_file and question:
-            try:
-                image = Image.open(image_file.stream).convert("RGB")
+# Process the image
+if st.button("Get Answer"):
+    if uploaded_file is None:
+        st.warning("Please upload an image first.")
 
-                # Extract text using OCR
+    elif not question.strip():
+        st.warning("Please enter a question.")
+
+    else:
+        try:
+            # Check that Tesseract is available
+            if (
+                os.name != "nt"
+                and shutil.which("tesseract") is None
+            ):
+                st.error(
+                    "Tesseract OCR is not installed on the server. "
+                    "Please check packages.txt."
+                )
+                st.stop()
+
+            # Display the uploaded image
+            image = Image.open(uploaded_file).convert("RGB")
+
+            st.subheader("Uploaded Image")
+            st.image(image, use_container_width=True)
+
+            # Extract text using OCR
+            with st.spinner("Extracting text from the image..."):
                 extracted_text = pytesseract.image_to_string(image)
 
-                # Split text into chunks
-                chunks = split_text(extracted_text)
+            st.subheader("Extracted Text")
 
-                # Retrieve answer
-                answer = find_answer(question, chunks)
+            if extracted_text.strip():
+                st.text_area(
+                    "Text detected in your image",
+                    extracted_text,
+                    height=200
+                )
+            else:
+                st.warning(
+                    "No readable text was found in this image."
+                )
 
-            except Exception as error:
-                answer = f"Error: {error}"
+            # Retrieve the relevant answer
+            chunks = split_text(extracted_text)
 
-    return render_template_string(
-        HTML,
-        extracted_text=extracted_text,
-        answer=answer
-    )
+            if chunks:
+                with st.spinner("Loading AI model and finding the answer..."):
+                    model = load_model()
+                    answer = find_answer(
+                        question.strip(),
+                        chunks,
+                        model
+                    )
 
+                st.subheader("💡 Answer")
+                st.success(answer)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+            else:
+                st.info(
+                    "Try uploading a clearer image containing readable text."
+                )
+
+        except Exception as error:
+            st.error(
+                "An error occurred while processing the image."
+            )
+            st.exception(error)
